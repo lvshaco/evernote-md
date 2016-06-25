@@ -56,6 +56,12 @@ wshandler.getnotebooks = function(ws, v, msgid) {
             ws.sendJson(msgid, "ListNotebooks Fail");
         } else {
             ws.sendJson(msgid, notebooks);
+            for (var i=0; i<notebooks.length; ++i) {
+                var nb = notebooks[i];
+                setTimeout(function() {
+                    wshandler.getnotecount(ws, {guid: this.guid}, 'getnotecount');
+                }.bind(nb), 0);
+            }
         }
     });
 }
@@ -131,5 +137,46 @@ wshandler.getnote = function(ws, v, msgid) {
     });
 }
 
-wshandler.upnote = function(ws, v, msgid) {
+wshandler.updatenote = function(ws, v, msgid) {
+    if (!ws.client) {
+        return "No logined";
+    }
+    var client = ws.client;
+    var noteStore = client.getNoteStore();
+
+    var note = new Evernote.Note();
+    note.guid = v.guid;
+    note.title = v.title;
+    note.content = v.body;
+
+    noteStore.updateNote(note, function(err, note) {
+        if (err) {
+            console.log(err);
+            ws.sendJson(msgid, "updateNote Fail");
+        } else {
+            ws.sendJson(msgid, {notebookguid:v.notebookguid, guid:v.guid});
+        }
+    });
+}
+
+wshandler.createnote = function(ws, v, msgid) {
+    if (!ws.client) {
+        return "No logined";
+    }
+    var client = ws.client;
+    var noteStore = client.getNoteStore();
+
+    var note = new Evernote.Note();
+    note.notebookGuid = v.notebookguid;
+    note.title = v.title;
+    note.content = v.body;
+
+    noteStore.createNote(note, function(err, note) {
+        if (err) {
+            console.log(err);
+            ws.sendJson(msgid, "createNote Fail");
+        } else {
+            ws.sendJson(msgid, {notebookguid:v.notebookguid, guid:note.guid});
+        }
+    });
 }

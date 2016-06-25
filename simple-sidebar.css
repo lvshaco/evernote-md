@@ -26,7 +26,8 @@
     height: 100%;
     margin-left: -250px;
     overflow-y: auto;
-    background: #000;
+    /*background: #000;*/
+    background-color: rgb(43,47,54);
     -webkit-transition: all 0.3s ease;
     -moz-transition: all 0.3s ease;
     -o-transition: all 0.3s ease;
@@ -64,18 +65,55 @@
 .sidebar-nav li {
     text-indent: 20px;
     line-height: 40px;
+    font-size: 14px;
+    font-weight: bold; 
+    list-style-type:none;
+    margin:0px;
+    padding:0px;
+}
+
+.sidebar-nav li ul{
+    list-style:none;
+    margin:0px;
+    padding:0px;
+}
+
+.sidebar-nav li ul li{
+    font-size: 14px;
+    font-weight: normal; 
+    list-style-type:none;
+    margin:0px;
+    padding-left:10px;
 }
 
 .sidebar-nav li a {
     display: block;
     text-decoration: none;
-    color: #999999;
+    /*color: #999999;*/
+    /*color: rgb(208,214,227);*/
+    color: rgb(160,170,192);
 }
+
+.sidebar-nav li ul li a {
+    display: block;
+    text-decoration: none;
+    /*color: #999999;*/
+    color: rgb(208,214,227);
+}
+.sidebar-nav li ul li a:hover {
+    text-decoration: none;
+    /*color: #fff;*/
+    /*background: rgb(55,61,73);*/
+    background-color: rgb(43,47,54);
+    color: rgb(38,216,187);
+}
+
 
 .sidebar-nav li a:hover {
     text-decoration: none;
-    color: #fff;
-    background: rgba(255,255,255,0.2);
+    /*color: #fff;*/
+    background: rgb(55,61,73);
+    color: rgb(38,216,187);
 }
 
 .sidebar-nav li a:active,

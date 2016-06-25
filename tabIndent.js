@@ -1,8 +1,7 @@
 tabIndent = {
 	version: '0.1.8',
 	config: {
-		//tab: '\t'
-        tab:'    '
+		tab: '\t'
 	},
 	events: {
 		keydown: function(e) {

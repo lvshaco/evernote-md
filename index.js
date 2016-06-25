@@ -1,14 +1,105 @@
 function log(msg) {
     console.log(msg)
 }
-
+var defnotebookname = "blog";
 //var wsurl = "ws://"+window.location.host+"/gmop";
 var wsurl = "ws://localhost:20161/gmop";
 var ws;
-var vm;
-var waiting_cmd;
+var req_waiting = {};
 var notebooks;
+var editnotebook;
+var edit = {notebook:null, title:"", content:""};
 
+// request
+var req = {}
+req.getnotebooks = function() {
+    if (!notebooks) {
+        wssend("getnotebooks")
+    }
+}
+//req.getnotecount = function() {
+//    for (var i=0; i<notebooks.length; ++i) {
+//        var nb = notebooks[i];
+//        if (!nb.notecount) {
+//            wssend("getnotecount", {guid: nb.guid});
+//        }
+//    }
+//}
+req.getnotes = function(nb) {
+    wssend("getnotes", {guid: nb.guid, offset:0, count:nb.notecount});
+}
+req.getnote = function(n) {
+    wssend("getnote", {notebookguid:n.notebookguid, guid:n.guid});
+}
+for (var key in req) {
+    var func = req[key];
+    req[key] = function(key, func) {
+        return function(v) {
+            if (!req_waiting[key]) {
+                req_waiting[key] = true;
+                func(v);
+            } else {
+            }
+        }
+    }(key, func);
+}
+
+// response
+var res = {}
+res.auth = function(v) {
+    req.getnotebooks();
+}
+res.getnotebooks = function(v) {
+    log(v);
+    notebooks = v;
+    refresh_notebooks();
+}
+res.getnotecount = function(v) {
+    var nbc = v.notebookCounts;
+    for (var guid in nbc) {
+        var nb = find_notebook(guid);
+        if (nb) {
+            nb.notecount = nbc[guid];
+            nb.reqnotecount = 0;
+            refresh_notebookcount(nb);
+        } else {
+            log("Not found notebook:"+guid);
+        }
+    }
+}
+res.getnotes = function(v) {
+    log("getnotes:"+v.guid);
+    var nb = find_notebook(v.guid);
+    if (nb) {
+        log("refresh_notes");
+        var notes = v.notes;
+        nb.notes = notes;
+        for (var i=0; i<notes.length; ++i) {
+            var n = notes[i];
+            n.notebookguid = nb.guid;
+        }
+        refresh_notes(nb, notes, v.startIndex, v.totalNotes);
+    }
+}
+res.getnote = function(v) {
+    var nb = find_notebook(v.notebookguid);
+    if (nb) {
+        var n = find_note(nb, v.guid);
+        if (n) {
+            n.content = v.content;
+            refresh_note(n);
+        }
+    }
+}
+
+function find_notebook_byname(name) {
+    for (var i=0; i<notebooks.length; ++i) {
+        var nb = notebooks[i];
+        if (nb.name == name) {
+            return nb;
+        }
+    }
+}
 function find_notebook(guid) {
     for (var i=0; i<notebooks.length; ++i) {
         var nb = notebooks[i];
@@ -17,7 +108,6 @@ function find_notebook(guid) {
         }
     }
 }
-
 function find_note(nb, guid) {
     var notes = nb.notes;
     for (var i=0; i<notes.length; ++i) {
@@ -28,68 +118,21 @@ function find_note(nb, guid) {
     }
 }
 
-function req_notebookcount() {
-    for (var i=0; i<notebooks.length; ++i) {
-        var nb = notebooks[i];
-        wssend("getnotecount", {guid: nb.guid});
+function savenote() {
+    if (edit.title != "" || edit.content != "") {
     }
 }
-
-function req_notes(nb) {
-    if (nb.__count) {
-        wssend("getnotes", {guid: nb.guid, offset:0, count:nb.__count});
+function createnote() {
+    if (!editnotebook) {
+        return;
     }
+    savenote();
+    edit.notebook = editnotebook;
+    $("#md-title").val("");
+    $("#md-content").val("");
+    $("#md-render").text("");
 }
 
-function req_note(n) {
-    wssend("getnote", {notebookguid:n.notebookguid, guid:n.guid});
-}
-
-var wshandler = {}
-
-wshandler.auth = function(v) {
-    //vm.onlogined(true, v);
-
-    wssend("getnotebooks")
-}
-
-wshandler.getnotebooks = function(v) {
-    log(v);
-    refresh_notebooks(v);
-}
-
-wshandler.getnotecount = function(v) {
-    var nbc = v.notebookCounts;
-    for (var guid in nbc) {
-        var nb = find_notebook(guid);
-        if (nb) {
-            nb.__count = nbc[guid];
-            refresh_notebookcount(nb);
-        } else {
-            log("Not found notebook:"+guid);
-        }
-    }
-}
-
-wshandler.getnotes = function(v) {
-    log("getnotes:"+v.guid);
-    var nb = find_notebook(v.guid);
-    if (nb) {
-        log("refresh_notes");
-        refresh_notes(nb, v.notes);
-    }
-}
-
-wshandler.getnote = function(v) {
-    var nb = find_notebook(v.notebookguid);
-    if (nb) {
-        var n = find_note(nb, v.guid);
-        if (n) {
-            n.content = v.content;
-            vm.input = n.content;
-        }
-    }
-}
 
 function wscreate(user, passwd) {
     ws = new WebSocket(wsurl);
@@ -100,10 +143,10 @@ function wscreate(user, passwd) {
     ws.onmessage = function(e) {
         var v = JSON.parse(e.data);
         log(v);
-        if (v.cmd == waiting_cmd) {
-            waiting_cmd = null
-        } 
-        var f = wshandler[v.id];
+        if (req_waiting[v.id]) {
+            req_waiting[v.id] = null;
+        }
+        var f = res[v.id];
         if (f) {
             f(v.body)
         } else {
@@ -112,12 +155,12 @@ function wscreate(user, passwd) {
     }
     ws.onclose = function(e) {
         log("closed");
-        //vm.onlogined(false)
     }
 }
 function wsclose() {
     if (ws) {
-        ws.close()
+        ws.close();
+        req_waiting = {};
     }
 }
 function wssend(msgid, body) {
@@ -133,7 +176,7 @@ function dom_notebookhead(nb, count) {
         strcnt = '<span class="badge">'+count+'</span>'+
             '<i class="fa fa-fw fa-caret-down"></i>';
     }
-    return ' '+nb.name+' '+strcnt;
+    return '<i class="fa fa-book"></i> '+nb.name+' '+strcnt;
 }
 
 function dom_notebook(nb) {
@@ -143,7 +186,7 @@ function dom_notebook(nb) {
     '<a id="'+head+'" href="javascript:;" data-toggle="collapse" data-target="#'+id+'">'+
     dom_notebookhead(nb)+
     '</a>'+
-    '<ul id="'+id+'" class="collapse">'+
+    '<ul id="'+id+'">'+// class="collapse">'+
     '</ul>'
     return s;
 }
@@ -152,11 +195,11 @@ function dom_notetitle(n) {
     return '<a href="#">'+n.title+'</a>'
 }
 
-function refresh_notebooks(v) {
-    notebooks = v;
-    for (var i=0; i<notebooks.length; ++i) {
-        notebooks[i].__index = i; // add __index
-    }
+function dom_newnotetext(name) {
+    return "在"+name+"中新建笔记";
+}
+
+function refresh_notebooks() {
     var ul = document.getElementById("notebooks");
 
     while(ul.hasChildNodes()) {
@@ -169,25 +212,52 @@ function refresh_notebooks(v) {
         ul.appendChild(li);
         li.__data = nb;
         li.onclick = function() {
-            req_notes(this.__data);
+            var nb = this.__data;
+            if (nb.reqnotecount < nb.notecount) {
+                req.getnotes(nb);
+            }
         }
     }
-    req_notebookcount();
+    var ul = document.getElementById("sel_notebooks");
+    while(ul.hasChildNodes()) {
+        ul.removeChild(ul.firstChild);
+    }
+    for (var i=0; i<notebooks.length; ++i) {
+        var nb = notebooks[i];
+        var li = document.createElement("li");
+        li.innerHTML = '<a href="#">'+dom_newnotetext(nb.name)+'</a>';
+        ul.appendChild(li);
+        li.__data = nb;
+        li.onclick = function() {
+            refresh_editnotebook(this.__data);
+        }
+    }
+    if (!editnotebook) {
+        var nb = find_notebook_byname(defnotebookname);
+        if (!nb && notebooks.length>0) {
+            nb = notebooks[0];
+        }
+        if (nb) {
+            refresh_editnotebook(nb);
+        }
+    }
+    //req.notebookcount();
+}
+
+function refresh_editnotebook(nb) {
+    var btn = document.getElementById("newnote");
+    btn.innerHTML = ' + '+dom_newnotetext(nb.name);
+    editnotebook = nb;
 }
 
 function refresh_notebookcount(nb) {
     var head = document.getElementById("notebookhead"+nb.name);
     if (head) {
-        head.innerHTML = dom_notebookhead(nb, nb.__count);
+        head.innerHTML = dom_notebookhead(nb, nb.notecount);
     }
 }
 
-function refresh_notes(nb, notes) {
-    nb.notes = notes;
-    for (var i=0; i<notes.length; ++i) {
-        var n = notes[i];
-        n.notebookguid = nb.guid;
-    }
+function refresh_notes(nb, notes, start, count) {
     var ul = document.getElementById("notebook"+nb.name);
     while(ul.hasChildNodes()) {
         ul.removeChild(ul.firstChild);
@@ -199,9 +269,23 @@ function refresh_notes(nb, notes) {
         ul.appendChild(li);
         li.__data = n;
         li.onclick = function() {
-            req_note(this.__data);
+            var n = this.__data;
+            if (!n.content) {
+                req.getnote(n);
+            } else {
+                refresh_note(n);
+            }
         }
     }
+    nb.reqnotecount = start+count;
+}
+
+function refresh_note(n) {
+    var c = document.getElementById("md-content");
+    c.innerHTML = enml.PlainTextOfENML(n.content);
+    var t = document.getElementById("md-title");
+    log(n.title)
+    t.value = n.title
 }
 
 marked.setOptions({
@@ -210,34 +294,15 @@ marked.setOptions({
     }
 });
 
-var test=enml.PlainTextOfENML('<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">\n<en-note style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;"><div>Hello</div>\n<div>World!!</div>\n</en-note>');
-var test=enml.HTMLOfENML('<!DOCTYPE en-note SYSTEM "http://xml.evernote.com/pub/enml2.dtd">\n<en-note style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;"><div>Hello</div>\n<div>World!!</div>\n</en-note>');
-
-vm = new Vue({
-    el: 'body',
-    data: {
-        input: test,
-        notebooks: [],
-    },
-    filters: {
-        marked: marked
-    }
-})
-
-var md_value = "";
-function check_md_change() {
+function check_edit_content() {
     var md = document.getElementById("md-content");
-    if (md.value != md_value) {
-        md_value = md.value;
+    if (md.value != edit.content) {
+        edit.content = md.value;
 
-        marked(md_value, function (err, content) {
+        marked(edit.content, function (err, content) {
             if (!err) {
                 var r = document.getElementById("md-render");
                 r.innerHTML = content;
-                console.log(md.scrollTop+" "+md.scrollHeight);
-                if (md.scrollTop == md.scrollHeight) {
-                    r.scrollTop = r.scrollHeight;
-                }
             }
         });
     }
@@ -251,8 +316,15 @@ $(document).ready(function() {
     //$("#md-content").change(function() {
     //    log("value changed");
     //});
-    setInterval("check_md_change()", 1000);
+    setInterval("check_edit_content()", 500);
     $("#md-content").on("focus", function() {
         $("#wrapper").toggleClass("toggled", true);
+    });
+    $('#md-title').bind('input propertychange', function() {
+        edit.title = $(this).val();
+        console.log(edit.title);
+    });
+    $('#newnote').click(function(e) {
+        createnote();
     });
 });
