@@ -128,11 +128,10 @@ function createnote() {
     }
     savenote();
     edit.notebook = editnotebook;
-    $("#md-title").val("");
-    $("#md-content").val("");
-    $("#md-render").text("");
+    edit.title = "";
+    edit.content = "";
+    refresh_note(edit);
 }
-
 
 function wscreate(user, passwd) {
     ws = new WebSocket(wsurl);
@@ -280,12 +279,20 @@ function refresh_notes(nb, notes, start, count) {
     nb.reqnotecount = start+count;
 }
 
+function refresh_render() {
+    marked(edit.content, function (err, content) {
+        if (!err) {
+            var r = document.getElementById("md-render");
+            r.innerHTML = content;
+        }
+    });
+}
 function refresh_note(n) {
     var c = document.getElementById("md-content");
-    c.innerHTML = enml.PlainTextOfENML(n.content);
+    c.value = enml.PlainTextOfENML(n.content);
     var t = document.getElementById("md-title");
-    log(n.title)
-    t.value = n.title
+    t.value = n.title;
+    refresh_render();
 }
 
 marked.setOptions({
@@ -298,13 +305,7 @@ function check_edit_content() {
     var md = document.getElementById("md-content");
     if (md.value != edit.content) {
         edit.content = md.value;
-
-        marked(edit.content, function (err, content) {
-            if (!err) {
-                var r = document.getElementById("md-render");
-                r.innerHTML = content;
-            }
-        });
+        refresh_render();
     }
 }
 

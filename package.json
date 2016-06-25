@@ -1,0 +1,13 @@
+{
+  "name": "evernote-md",
+  "version": "1.0.0",
+  "description": "",
+  "author": "",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "dependencies": {
+    "evernote": "^1.25.82"
+  }
+}
