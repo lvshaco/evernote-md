@@ -89,10 +89,11 @@ noteStore.listNotebooks(function(err, notebooks) {
     
     var mybook = findNotebook(notebooks, "blog");
     console.log(mybook.guid);
-    //makeNote(noteStore, "tile: test by md", "content: test by md", mybook, function(note) {
-    //    console.log("make Node ok:"+note);
-    //});
-
+    makeNote(noteStore, "tile: test by md", "content: test by md", mybook, function(note) {
+        console.log("make Node ok:");
+        console.log(note);
+    });
+return;
     var filter = new Evernote.NoteFilter();
     filter.notebookGuid = mybook.guid;
     filter.order = Evernote.NoteSortOrder.CREATED;

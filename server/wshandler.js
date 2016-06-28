@@ -147,14 +147,14 @@ wshandler.updatenote = function(ws, v, msgid) {
     var note = new Evernote.Note();
     note.guid = v.guid;
     note.title = v.title;
-    note.content = v.body;
+    note.content = v.content;
 
     noteStore.updateNote(note, function(err, note) {
         if (err) {
             console.log(err);
             ws.sendJson(msgid, "updateNote Fail");
         } else {
-            ws.sendJson(msgid, {notebookguid:v.notebookguid, guid:v.guid});
+            ws.sendJson(msgid, {guid:v.guid});
         }
     });
 }
@@ -166,17 +166,18 @@ wshandler.createnote = function(ws, v, msgid) {
     var client = ws.client;
     var noteStore = client.getNoteStore();
 
+    var myguid = v.guid;
     var note = new Evernote.Note();
     note.notebookGuid = v.notebookguid;
     note.title = v.title;
-    note.content = v.body;
+    note.content = v.content;
 
     noteStore.createNote(note, function(err, note) {
         if (err) {
             console.log(err);
             ws.sendJson(msgid, "createNote Fail");
         } else {
-            ws.sendJson(msgid, {notebookguid:v.notebookguid, guid:note.guid});
+            ws.sendJson(msgid, {myguid:myguid, guid:note.guid});
         }
     });
 }

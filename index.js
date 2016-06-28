@@ -1,14 +1,20 @@
 function log(msg) {
     console.log(msg)
 }
+var editor;
 var defnotebookname = "blog";
 //var wsurl = "ws://"+window.location.host+"/gmop";
 var wsurl = "ws://localhost:20161/gmop";
 var ws;
+var logined = false;
 var req_waiting = {};
 var notebooks;
 var editnotebook;
-var edit = {notebook:null, title:"", content:""};
+var edit;
+var pending_id = 0;
+var pending_notes = {};
+var last_sync = false;
+var tick = 0;
 
 // request
 var req = {}
@@ -31,12 +37,20 @@ req.getnotes = function(nb) {
 req.getnote = function(n) {
     wssend("getnote", {notebookguid:n.notebookguid, guid:n.guid});
 }
+req.updatenote = function(n) {
+    wssend("updatenote", {guid:n.guid, title:n.title, content:n.content});
+}
+req.createnote = function(n) {
+    wssend("createnote", {guid:n.guid, title:n.title, content:n.content,
+        notebookguid:n.notebook.guid});
+}
 for (var key in req) {
     var func = req[key];
     req[key] = function(key, func) {
         return function(v) {
             if (!req_waiting[key]) {
                 req_waiting[key] = true;
+                update_refresh_btn(true);
                 func(v);
             } else {
             }
@@ -47,6 +61,8 @@ for (var key in req) {
 // response
 var res = {}
 res.auth = function(v) {
+    req_waiting = {}
+    logined = true;
     req.getnotebooks();
 }
 res.getnotebooks = function(v) {
@@ -87,8 +103,27 @@ res.getnote = function(v) {
         var n = find_note(nb, v.guid);
         if (n) {
             n.content = v.content;
-            refresh_note(n);
+            note.edit(n);
         }
+    }
+}
+
+res.updatenote = function(v) {
+    var guid = v.guid;
+    var n = pending_notes[guid];
+    if (n) {
+        delete pending_notes[guid];
+    }
+}
+
+res.createnote = function(v) {
+    var id = v.myguid
+    var n = pending_notes[id];
+    if (n) {
+        delete pending_notes[id];
+        delete n.nocreate;
+        n.guid = v.guid;
+        refresh_addnote(n.notebook, n);
     }
 }
 
@@ -118,35 +153,85 @@ function find_note(nb, guid) {
     }
 }
 
-function savenote() {
-    if (edit.title != "" || edit.content != "") {
-    }
+var note = {}
+
+note.hascontent = function(n) {
+    return n.title != "" || n.content != ""
 }
-function createnote() {
-    if (!editnotebook) {
-        return;
+note.save = function(n) {
+    if (!n) return false;
+    if (!n.md_changed1 && !n.md_changed2) return false;
+    if (n.md_changed1) {
+        n.title = $("#md-title").val();
+        n.md_changed1 = false;
     }
-    savenote();
-    edit.notebook = editnotebook;
-    edit.title = "";
-    edit.content = "";
+    if (n.md_changed2) {
+        //var content = $("#md-content").val();
+        content = editor.getValue();
+        n.content = enml.ENMLOfPlainText(content);
+        n.md_changed2 = false;
+    }
+    if (!n.title.match(/\S/)) {
+        n.title = "Untitled"
+    }
+    if (!n.guid) {
+        pending_id++;
+        n.guid = pending_id;
+        n.nocreate = true;
+    } else {
+        refresh_notetitle(n);
+    }
+    pending_notes[n.guid] = n;
+    
+    // todo check n.notebook, check ws
+}
+note.create = function() {
+    var n = {
+        notebook: editnotebook,
+        title: "",
+        content: ""
+    }
+    note.edit(n);
+}
+note.edit = function(n) {
+    note.save(edit);
+    edit = n;
     refresh_note(edit);
 }
+note.update = function() {
+    if (!logined) return;
+    if (req_waiting["updatenote"] ||
+        req_waiting["createnote"]) {
+        return;
+    }
+    for (var id in pending_notes) {
+        var n = pending_notes[id];
+        if (n.nocreate) {
+            req.createnote(n);
+        } else {
+            req.updatenote(n);
+        }
+        break;
+    }
+}
 
-function wscreate(user, passwd) {
+function wscreate() {
     ws = new WebSocket(wsurl);
     ws.onopen = function() {
         log("open");
+
+        var user = "md"; 
+        var passwd = "123456";
         wssend("auth", {user:user, passwd:passwd});
     }
     ws.onmessage = function(e) {
         var v = JSON.parse(e.data);
         log(v);
         if (req_waiting[v.id]) {
-            req_waiting[v.id] = null;
+            delete req_waiting[v.id];
         }
         var f = res[v.id];
-        if (f) {
+        if (f) { // todo err:{code:?}
             f(v.body)
         } else {
             log("Invalid msg: "+e.data)
@@ -154,20 +239,27 @@ function wscreate(user, passwd) {
     }
     ws.onclose = function(e) {
         log("closed");
+        wsclose();
     }
 }
 function wsclose() {
     if (ws) {
         ws.close();
-        req_waiting = {};
+        delete ws;
+        ws = null;
+        logined = false;
+        // don't clear, just keep waiting for other logic need (eg btn_refresh)
+        //req_waiting = {}; 
     }
 }
 function wssend(msgid, body) {
-    var v = {id: msgid, body: body||{}};
-    ws.send(JSON.stringify(v))
+    if (ws) {
+        var v = {id: msgid, body: body||{}};
+        ws.send(JSON.stringify(v))
+    }
 }
 
-wscreate("md", "123456");
+wscreate();
 
 function dom_notebookhead(nb, count) {
     var strcnt = "";
@@ -201,8 +293,8 @@ function dom_newnotetext(name) {
 function refresh_notebooks() {
     var ul = document.getElementById("notebooks");
 
-    while(ul.hasChildNodes()) {
-        ul.removeChild(ul.firstChild);
+    while (ul.children.length > 1) {
+        ul.removeChild(ul.children[1]);
     }
     for (var i=0; i<notebooks.length; ++i) {
         var nb = notebooks[i];
@@ -247,6 +339,15 @@ function refresh_editnotebook(nb) {
     var btn = document.getElementById("newnote");
     btn.innerHTML = ' + '+dom_newnotetext(nb.name);
     editnotebook = nb;
+    for (var id in pending_notes) {
+        var n = pending_notes[id];
+        if (n && !n.notebook) {
+            n.notebook = editnotebook;
+        }
+    }
+    if (!edit.notebook) {
+        edit.notebook = editnotebook;
+    }
 }
 
 function refresh_notebookcount(nb) {
@@ -256,6 +357,21 @@ function refresh_notebookcount(nb) {
     }
 }
 
+function dom_createnotetitle(n) {
+    var li = document.createElement("li");
+    li.innerHTML = dom_notetitle(n);//'<a href="#">'+nb.name+'</a>';
+    li.__data = n;
+    n.__dom = li;
+    li.onclick = function() {
+        var n = this.__data;
+        if (!n.content) {
+            req.getnote(n);
+        } else {
+            note.edit(n);
+        }
+    }
+    return li;
+}
 function refresh_notes(nb, notes, start, count) {
     var ul = document.getElementById("notebook"+nb.name);
     while(ul.hasChildNodes()) {
@@ -263,36 +379,39 @@ function refresh_notes(nb, notes, start, count) {
     }
     for (var i=0; i<notes.length; ++i) {
         var n = notes[i];
-        var li = document.createElement("li");
-        li.innerHTML = dom_notetitle(n);//'<a href="#">'+nb.name+'</a>';
+        var li = dom_createnotetitle(n);
         ul.appendChild(li);
-        li.__data = n;
-        li.onclick = function() {
-            var n = this.__data;
-            if (!n.content) {
-                req.getnote(n);
-            } else {
-                refresh_note(n);
-            }
-        }
     }
     nb.reqnotecount = start+count;
 }
 
-function refresh_render() {
-    marked(edit.content, function (err, content) {
+function refresh_addnote(nb, n) {
+    var ul = document.getElementById("notebook"+nb.name);
+    var li = dom_createnotetitle(n);
+    ul.insertBefore(li, ul.firstChild);
+}
+
+function refresh_notetitle(n) {
+    n.__dom.innerHTML = dom_notetitle(n);
+}
+
+function refresh_render(content) {
+    marked(content, function (err, content) {
         if (!err) {
             var r = document.getElementById("md-render");
             r.innerHTML = content;
+        } else {
+            log("md-render fail");
         }
     });
 }
 function refresh_note(n) {
-    var c = document.getElementById("md-content");
-    c.value = enml.PlainTextOfENML(n.content);
+    var value = enml.PlainTextOfENML(n.content);
+    editor.setValue(value);
+    refresh_render(editor.getValue());
+
     var t = document.getElementById("md-title");
     t.value = n.title;
-    refresh_render();
 }
 
 marked.setOptions({
@@ -301,31 +420,76 @@ marked.setOptions({
     }
 });
 
+function update_refresh_btn(sync) {
+    if (sync != last_sync) {
+        last_sync = sync;
+        if (sync) {
+            $("#btn-refresh").attr("class", "btn fa fa-refresh fa-lg fa-spin");
+        } else {
+            $("#btn-refresh").attr("class", "btn fa fa-refresh fa-lg");
+        }
+    }
+}
+function update() {
+    check_edit_content();
+    note.update();
+
+    var sync = false;
+    for (var k in req_waiting) {
+        sync = true;
+        break;
+    }
+
+    if (tick%2 == 0) {
+        update_refresh_btn(sync);
+    }
+    if (tick%6 == 0) {
+        if (!ws) {
+            wscreate();
+        }
+    }
+    tick++;
+}
 function check_edit_content() {
-    var md = document.getElementById("md-content");
-    if (md.value != edit.content) {
-        edit.content = md.value;
-        refresh_render();
+    if (edit.content_changed) {
+        edit.content_changed = false;
+        //var c = document.getElementById("md-content");
+        //refresh_render(c.value);
+        refresh_render(editor.getValue());
     }
 }
 
 $(document).ready(function() {
-    $("#wrapper").toggleClass("toggled");
+    editor = ace.edit("md-content");
+    editor.setTheme("ace/theme/twilight");
+    editor.getSession().setMode("ace/mode/markdown");
+    editor.getSession().setTabSize(4);
+    editor.getSession().setUseSoftTabs(true);
+    editor.getSession().setUseWrapMode(true);
+    editor.setKeyboardHandler('ace/keyboard/vim');
+    //editor.setHighlightActiveLine(false);
+    
+    $("#wrapper").toggleClass("toggled", false);
     $("#menu-toggle").click(function(e) {
         $("#wrapper").toggleClass("toggled");
     });
-    //$("#md-content").change(function() {
-    //    log("value changed");
-    //});
-    setInterval("check_edit_content()", 500);
-    $("#md-content").on("focus", function() {
-        $("#wrapper").toggleClass("toggled", true);
+    $("#btn-refresh").attr("class", "btn fa fa-refresh fa-lg");
+   
+    editor.on("focus", function() {
+    //$("#md-content").on("focus", function() {
+        $("#wrapper").toggleClass("toggled", false);
     });
     $('#md-title').bind('input propertychange', function() {
-        edit.title = $(this).val();
-        console.log(edit.title);
+        var v = $(this).val();
+        edit.md_changed1 = true;
+    });
+    $('#md-content').bind('input propertychange', function() {
+        var v = $(this).val();
+        edit.content_changed = true;
+        edit.md_changed2 = true;
     });
     $('#newnote').click(function(e) {
-        createnote();
+        note.create();
     });
-});
+    setInterval("update()", 500);
+    note.create();});
